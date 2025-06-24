@@ -2,7 +2,7 @@ import streamlit as st
 import anthropic
 import os
 
-# Load secrets securely
+# Load secrets
 API_KEY = st.secrets["claude"]["api_token"]
 MCP_URL = st.secrets["pipeboard"]["url"]
 os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
@@ -10,7 +10,7 @@ os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=API_KEY)
 
-# Streamlit UI setup
+# Streamlit setup
 st.set_page_config(page_title="Meta Ads Chat", layout="centered")
 st.title("📊 Meta Ads Assistant")
 st.write("Ask me anything about your Meta Ads performance.")
@@ -26,9 +26,7 @@ if user_input := st.chat_input("Ask a question..."):
                 response = client.beta.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=20000,
-                    messages=[
-                        {"role": "user", "content": user_input}
-                    ],
+                    messages=[{"role": "user", "content": user_input}],
                     mcp_servers=[{
                         "type": "url",
                         "url": f"{MCP_URL}/mcp/",
@@ -37,17 +35,21 @@ if user_input := st.chat_input("Ask a question..."):
                     extra_headers={"anthropic-beta": "mcp-client-2025-04-04"}
                 )
 
-                # Combine all text from the response into a single string
-                reply = ""
-                for block in response.content:
+                # Find the last BetaTextBlock
+                last_text = ""
+                for block in reversed(response.content):
                     if hasattr(block, "text"):
-                        reply += f"{block.text}\n\n"
+                        last_text = block.text
+                        break
                     elif hasattr(block, "content"):
-                        for sub_block in block.content:
+                        for sub_block in reversed(block.content):
                             if hasattr(sub_block, "text"):
-                                reply += f"{sub_block.text}\n\n"
+                                last_text = sub_block.text
+                                break
+                    if last_text:
+                        break
 
             except Exception as e:
-                reply = f"❌ Error: {e}"
+                last_text = f"❌ Error: {e}"
 
-        st.markdown(reply)
+        st.markdown(last_text)

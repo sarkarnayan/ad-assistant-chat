@@ -48,7 +48,7 @@ if user_input := st.chat_input("Ask a question..."):
                     "role": "assistant",
                     "content": f"Error: {e}"
                 })
-                return
+                
 
         # Show only latest response in collapsible blocks
         block_index = 1

@@ -1,8 +1,12 @@
 import streamlit as st
 import anthropic
+import os
 
 # Load Claude API key securely from secrets
-API_KEY = "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"
+
+API_KEY = st.secrets["claude"]["api_token"]
+MCP_URL = st.secrets["pipeboard"]["url"]
+os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
 
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=API_KEY)
@@ -37,7 +41,7 @@ if user_input := st.chat_input("Ask a question..."):
                     messages=st.session_state.chat_history,
                     mcp_servers=[{
                         "type": "url",
-                        "url": "https://your-meta-ads-mcp.onrender.com/mcp/",
+                        "url": f"{MCP_URL}/mcp/",
                         "name": "meta-ads"
                     }],
                     extra_headers={"anthropic-beta": "mcp-client-2025-04-04"}

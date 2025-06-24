@@ -11,7 +11,7 @@ os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
 client = anthropic.Anthropic(api_key=API_KEY)
 
 # Streamlit UI setup
-st.set_page_config(page_title="Meta Ads Assistant", layout="centered")
+st.set_page_config(page_title="Meta Ads Chat", layout="centered")
 st.title("📊 Meta Ads Assistant")
 st.write("Ask me anything about your Meta Ads performance.")
 
@@ -21,15 +21,10 @@ if "chat_history" not in st.session_state:
         {"role": "assistant", "content": "Hi! I'm your Meta Ads assistant. How can I help today?"}
     ]
 
-# Display chat history
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# User input handling
+# Chat input and processing
 if user_input := st.chat_input("Ask a question..."):
+    # Add user message to history
     st.session_state.chat_history.append({"role": "user", "content": user_input})
-
     with st.chat_message("user"):
         st.markdown(user_input)
 
@@ -53,9 +48,9 @@ if user_input := st.chat_input("Ask a question..."):
                     "role": "assistant",
                     "content": f"Error: {e}"
                 })
-                
+                return
 
-        # Display Claude's response in collapsible sections
+        # Show only latest response in collapsible blocks
         block_index = 1
         for block in response.content:
             label = f"Block {block_index}: "
@@ -65,13 +60,13 @@ if user_input := st.chat_input("Ask a question..."):
                 with st.expander(label + "Text"):
                     st.markdown(block.text)
 
-            elif hasattr(block, "content"):  # Tool result block
+            elif hasattr(block, "content"):
                 with st.expander(label + "Tool Result"):
                     for sub_block in block.content:
                         if hasattr(sub_block, "text"):
                             st.markdown(sub_block.text)
 
-            elif hasattr(block, "name") and hasattr(block, "input"):  # Tool call block
+            elif hasattr(block, "name") and hasattr(block, "input"):
                 with st.expander(label + f"Tool Call: `{block.name}`"):
                     st.markdown("**Input Parameters:**")
                     st.json(block.input)
@@ -80,7 +75,7 @@ if user_input := st.chat_input("Ask a question..."):
                 with st.expander(label + "Unknown Block"):
                     st.write(block)
 
-        # Store placeholder for this assistant reply
+        # Store placeholder in chat history (not rendered)
         st.session_state.chat_history.append({
             "role": "assistant",
             "content": "(response displayed above)"

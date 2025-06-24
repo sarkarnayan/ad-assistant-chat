@@ -2,8 +2,7 @@ import streamlit as st
 import anthropic
 import os
 
-# Load Claude API key securely from secrets
-
+# Load secrets securely
 API_KEY = st.secrets["claude"]["api_token"]
 MCP_URL = st.secrets["pipeboard"]["url"]
 os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
@@ -11,24 +10,26 @@ os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=API_KEY)
 
-st.set_page_config(page_title="Meta Ads Chat", layout="centered")
-st.title("📊 Meta Ads Chat Assistant")
+# Streamlit UI setup
+st.set_page_config(page_title="Meta Ads Assistant", layout="centered")
+st.title("📊 Meta Ads Assistant")
 st.write("Ask me anything about your Meta Ads performance.")
 
-# Chat history
+# Initialize chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "assistant", "content": "Hi! I'm your Meta Ads assistant. How can I help today?"}
     ]
 
-# Display chat
+# Display chat history
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Chat input
+# User input handling
 if user_input := st.chat_input("Ask a question..."):
     st.session_state.chat_history.append({"role": "user", "content": user_input})
+
     with st.chat_message("user"):
         st.markdown(user_input)
 
@@ -46,9 +47,41 @@ if user_input := st.chat_input("Ask a question..."):
                     }],
                     extra_headers={"anthropic-beta": "mcp-client-2025-04-04"}
                 )
-                reply = response.content[0].text
             except Exception as e:
-                reply = f"❌ Error: {e}"
+                st.error(f"❌ Error: {e}")
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"Error: {e}"
+                })
+                
 
-        st.markdown(reply)
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        # Display Claude's response in collapsible sections
+        block_index = 1
+        for block in response.content:
+            label = f"Block {block_index}: "
+            block_index += 1
+
+            if hasattr(block, "text"):
+                with st.expander(label + "Text"):
+                    st.markdown(block.text)
+
+            elif hasattr(block, "content"):  # Tool result block
+                with st.expander(label + "Tool Result"):
+                    for sub_block in block.content:
+                        if hasattr(sub_block, "text"):
+                            st.markdown(sub_block.text)
+
+            elif hasattr(block, "name") and hasattr(block, "input"):  # Tool call block
+                with st.expander(label + f"Tool Call: `{block.name}`"):
+                    st.markdown("**Input Parameters:**")
+                    st.json(block.input)
+
+            else:
+                with st.expander(label + "Unknown Block"):
+                    st.write(block)
+
+        # Store placeholder for this assistant reply
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": "(response displayed above)"
+        })

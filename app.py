@@ -33,7 +33,7 @@ if user_input := st.chat_input("Ask a question..."):
             try:
                 response = client.beta.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=200000,
+                    max_tokens=20000,
                     messages=st.session_state.chat_history,
                     mcp_servers=[{
                         "type": "url",

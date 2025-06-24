@@ -2,7 +2,7 @@ import streamlit as st
 import anthropic
 
 # Load Claude API key securely from secrets
-API_KEY = st.secrets["claude"]["api_key"]
+API_KEY = st.secrets["ANTHROPIC_API_KEY"]
 
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=API_KEY)

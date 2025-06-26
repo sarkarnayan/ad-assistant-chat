@@ -10,12 +10,12 @@ os.environ["PIPEBOARD_API_TOKEN"] = st.secrets["pipeboard"]["api_token"]
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=API_KEY)
 
-# Streamlit setup
+# UI setup
 st.set_page_config(page_title="Meta Ads Chat", layout="centered")
 st.title("📊 Meta Ads Assistant")
 st.write("Ask me anything about your Meta Ads performance.")
 
-# Chat input
+# Handle user input
 if user_input := st.chat_input("Ask a question..."):
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -35,21 +35,24 @@ if user_input := st.chat_input("Ask a question..."):
                     extra_headers={"anthropic-beta": "mcp-client-2025-04-04"}
                 )
 
-                # Find the last BetaTextBlock
-                last_text = ""
-                for block in reversed(response.content):
+                # Iterate through all blocks
+                for block in response.content:
+                    # Show all text blocks directly
                     if hasattr(block, "text"):
-                        last_text = block.text
-                        break
+                        st.markdown(block.text)
+
+                    # If it's a tool result with nested text
                     elif hasattr(block, "content"):
-                        for sub_block in reversed(block.content):
-                            if hasattr(sub_block, "text"):
-                                last_text = sub_block.text
-                                break
-                    if last_text:
-                        break
+                        with st.expander("🔧 Tool Result", expanded=False):
+                            for sub_block in block.content:
+                                if hasattr(sub_block, "text"):
+                                    st.markdown(sub_block.text)
+
+                    # Show tool usage (like get_ad_accounts, get_ads) in an expandable box
+                    elif getattr(block, "type", "") == "mcp_tool_use":
+                        with st.expander(f"⚙️ Tool Called: `{block.name}`", expanded=False):
+                            st.markdown("**Input:**")
+                            st.json(block.input)
 
             except Exception as e:
-                last_text = f"❌ Error: {e}"
-
-        st.markdown(last_text)
+                st.error(f"❌ Error: {e}")

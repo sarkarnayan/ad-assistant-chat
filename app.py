@@ -24,7 +24,7 @@ for turn in st.session_state.chat_history:
     with st.chat_message("user"):
         st.markdown(turn["user"])
     with st.chat_message("assistant"):
-        st.markdown(turn["text"])
+        # st.markdown(turn["text"])
         for block in turn["claude_blocks"]:
             if getattr(block, "type", "") == "mcp_tool_use":
                 with st.expander(f"⚙️ Tool Called: `{block.name}`"):
@@ -49,7 +49,7 @@ if user_input := st.chat_input("Ask a question about your meta ads..."):
         try:
             with client.messages.stream(
                 model="claude-sonnet-4-20250514",
-                max_tokens=20000,
+                max_tokens=200000,
                 messages=[{"role": "user", "content": user_input}],
                 mcp_servers=[{
                     "type": "url",

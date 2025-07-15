@@ -63,7 +63,7 @@ if user_input := st.chat_input("Ask a question..."):
             try:
                 response = client.beta.messages.create(
                     model="claude-opus-4-20250514",
-                    max_tokens=20000,
+                    max_tokens=10000,
                     messages=[{"role": "user", "content": user_input}],
                     mcp_servers=[{
                         "type": "url",

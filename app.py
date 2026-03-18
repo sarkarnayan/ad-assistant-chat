@@ -178,6 +178,12 @@ if not PIPEBOARD_AUTH_TOKEN:
     )
     st.stop()
 
+if "onrender.com" in MCP_ENDPOINT_URL:
+    st.warning(
+        "Pipeboard URL points to an onrender host. For Pipeboard remote MCP, "
+        "use https://meta-ads.mcp.pipeboard.co/"
+    )
+
 client = OpenAI(
     base_url="https://api.deepinfra.com/v1/openai",
     api_key=DEEPINFRA_API_KEY,

@@ -67,6 +67,9 @@ def resolve_pipeboard_connection(url: str, api_token: str | None):
 
     clean_query = urlencode(query, doseq=True)
     normalized_path = parsed_url.path or "/"
+    # The open-source onrender deployment serves MCP at /mcp/.
+    if parsed_url.netloc.endswith("onrender.com") and normalized_path in ("", "/"):
+        normalized_path = "/mcp/"
 
     normalized_url = urlunparse(
         (

@@ -50,6 +50,14 @@ MAX_TOKENS = int(
         default=4096,
     )
 )
+MAX_TOOL_ROUNDS = int(
+    get_secret_value(
+        "deepinfra",
+        "max_tool_rounds",
+        env_var="DEEPINFRA_MAX_TOOL_ROUNDS",
+        default=6,
+    )
+)
 
 
 def resolve_pipeboard_connection(url: str, api_token: str | None):
@@ -380,32 +388,42 @@ async def run_deepinfra_turn(user_input):
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_input},
         ]
-
-        first_response = client.chat.completions.create(
-            model=MODEL_NAME,
-            max_tokens=MAX_TOKENS,
-            messages=messages,
-            tools=tool_schemas,
-            tool_choice="auto",
-        )
-        assistant_message = first_response.choices[0].message
         tool_events = []
+        latest_assistant_text = ""
 
-        if assistant_message.tool_calls:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                max_tokens=MAX_TOKENS,
+                messages=messages,
+                tools=tool_schemas,
+                tool_choice="auto",
+            )
+            assistant_message = response.choices[0].message
+            latest_assistant_text = assistant_message.content or ""
+            tool_calls = assistant_message.tool_calls or []
+
+            if not tool_calls:
+                return latest_assistant_text, tool_events
+
             messages.append(
                 {
                     "role": "assistant",
-                    "content": assistant_message.content or "",
+                    "content": latest_assistant_text,
                     "tool_calls": [
-                        tool_call.model_dump()
-                        for tool_call in assistant_message.tool_calls
+                        tool_call.model_dump() for tool_call in tool_calls
                     ],
                 }
             )
 
-            for tool_call in assistant_message.tool_calls:
+            for tool_call in tool_calls:
                 function_call = get_function_tool_call(tool_call)
-                arguments = json.loads(function_call.arguments or "{}")
+                raw_arguments = function_call.arguments or "{}"
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+
                 tool_result = await mcp_client.call_tool(
                     function_call.name,
                     arguments,
@@ -428,22 +446,12 @@ async def run_deepinfra_turn(user_input):
                     }
                 )
 
-            final_response = client.chat.completions.create(
-                model=MODEL_NAME,
-                max_tokens=MAX_TOKENS,
-                messages=messages,
-                tools=tool_schemas,
-                tool_choice="auto",
-            )
-            final_message = final_response.choices[0].message
-            if final_message.tool_calls:
-                raise RuntimeError(
-                    "DeepInfra returned nested tool calls. The current "
-                    "integration supports one tool round per response."
-                )
-            return final_message.content or "", tool_events
-
-        return assistant_message.content or "", tool_events
+        fallback_text = (
+            latest_assistant_text
+            or "I completed multiple tool rounds but still need additional "
+            "tool calls to finish this request."
+        )
+        return fallback_text, tool_events
 
 
 st.set_page_config(page_title="Meta Ads Chat", layout="centered")

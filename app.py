@@ -3,6 +3,7 @@ import html
 import json
 import os
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import streamlit as st
 from fastmcp import Client as MCPClient
@@ -48,6 +49,42 @@ MAX_TOKENS = int(
         env_var="DEEPINFRA_MAX_TOKENS",
         default=4096,
     )
+)
+
+
+def resolve_pipeboard_connection(url: str, api_token: str | None):
+    parsed_url = urlparse(url)
+    query = parse_qs(parsed_url.query, keep_blank_values=True)
+
+    token_from_query = None
+    if "token" in query and query["token"]:
+        token_from_query = query["token"][0]
+
+    effective_token = api_token or token_from_query
+
+    if "token" in query:
+        query.pop("token")
+
+    clean_query = urlencode(query, doseq=True)
+    normalized_path = parsed_url.path or "/"
+
+    normalized_url = urlunparse(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            normalized_path,
+            parsed_url.params,
+            clean_query,
+            parsed_url.fragment,
+        )
+    )
+
+    return normalized_url, effective_token
+
+
+MCP_ENDPOINT_URL, PIPEBOARD_AUTH_TOKEN = resolve_pipeboard_connection(
+    MCP_BASE_URL,
+    PIPEBOARD_API_TOKEN,
 )
 
 SYSTEM_PROMPT = """\
@@ -121,8 +158,8 @@ Guidelines:
 - Keep API calls efficient: use filters rather than fetching all records.
 """
 
-if PIPEBOARD_API_TOKEN:
-    os.environ["PIPEBOARD_API_TOKEN"] = PIPEBOARD_API_TOKEN
+if PIPEBOARD_AUTH_TOKEN:
+    os.environ["PIPEBOARD_API_TOKEN"] = PIPEBOARD_AUTH_TOKEN
 
 if not DEEPINFRA_API_KEY:
     st.error(
@@ -131,8 +168,15 @@ if not DEEPINFRA_API_KEY:
     )
     st.stop()
 
-if not MCP_BASE_URL:
-    MCP_BASE_URL = "https://meta-ads.mcp.pipeboard.co"
+if not MCP_ENDPOINT_URL:
+    MCP_ENDPOINT_URL = "https://meta-ads.mcp.pipeboard.co/"
+
+if not PIPEBOARD_AUTH_TOKEN:
+    st.error(
+        "Missing Pipeboard API token. Set pipeboard.api_token or include "
+        "?token=... in pipeboard.url."
+    )
+    st.stop()
 
 client = OpenAI(
     base_url="https://api.deepinfra.com/v1/openai",
@@ -141,12 +185,7 @@ client = OpenAI(
 
 
 def mcp_endpoint_url():
-    url = MCP_BASE_URL.rstrip("/")
-    # Only add a trailing slash when there is no query string,
-    # to avoid corrupting ?token=... style URLs.
-    if "?" not in url:
-        url += "/"
-    return url
+    return MCP_ENDPOINT_URL
 
 
 def copy_button_js(text, key="copy"):
@@ -309,7 +348,7 @@ def get_function_tool_call(tool_call: Any):
 async def run_deepinfra_turn(user_input):
     async with MCPClient(
         mcp_endpoint_url(),
-        auth=PIPEBOARD_API_TOKEN,
+        auth=PIPEBOARD_AUTH_TOKEN,
     ) as mcp_client:
         mcp_tools = await mcp_client.list_tools()
         tool_schemas = build_openai_tools(mcp_tools)
@@ -443,4 +482,12 @@ if user_input := st.chat_input("Ask a question..."):
                     }
                 )
             except Exception as exc:
-                st.error(f"Error: {exc}")
+                error_text = str(exc)
+                if "401" in error_text and "pipeboard" in error_text.lower():
+                    st.error(
+                        "Pipeboard authentication failed (401). Regenerate your "
+                        "token at https://pipeboard.co/api-tokens or set "
+                        "pipeboard.api_token in secrets."
+                    )
+                else:
+                    st.error(f"Error: {exc}")

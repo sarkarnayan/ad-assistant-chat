@@ -211,7 +211,11 @@ def copy_button_js(text, key="copy"):
 def run_async(coro):
     try:
         return asyncio.run(coro)
-    except RuntimeError:
+    except RuntimeError as exc:
+        if "asyncio.run() cannot be called from a running event loop" not in str(
+            exc
+        ):
+            raise
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(coro)

@@ -141,8 +141,12 @@ client = OpenAI(
 
 
 def mcp_endpoint_url():
-    # Pipeboard's root URL is the MCP handler; no /mcp/ suffix needed.
-    return MCP_BASE_URL.rstrip("/") + "/"
+    url = MCP_BASE_URL.rstrip("/")
+    # Only add a trailing slash when there is no query string,
+    # to avoid corrupting ?token=... style URLs.
+    if "?" not in url:
+        url += "/"
+    return url
 
 
 def copy_button_js(text, key="copy"):

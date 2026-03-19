@@ -1,5 +1,4 @@
 import asyncio
-import html
 import json
 import os
 from typing import Any
@@ -225,16 +224,6 @@ def mcp_endpoint_url():
     return MCP_ENDPOINT_URL
 
 
-def copy_button_js(text, key="copy"):
-    escaped = html.escape(text).replace("`", "\\`")
-    return (
-        f"<button id=\"{key}\" "
-        f"onclick=\"navigator.clipboard.writeText(`{escaped}`); alert('Copied')\" "
-        "style='margin-top: 4px; padding: 4px 8px; font-size: 0.85rem;'>"
-        "Copy</button>"
-    )
-
-
 def run_async(coro):
     try:
         return asyncio.run(coro)
@@ -337,21 +326,10 @@ def render_tool_calls(tool_calls):
 def render_history_entry(entry, index):
     with st.chat_message("user"):
         st.markdown(entry["user"])
-        st.markdown(
-            copy_button_js(entry["user"], f"user_copy_{index}"),
-            unsafe_allow_html=True,
-        )
 
     with st.chat_message("assistant"):
         if entry.get("assistant"):
             st.markdown(entry["assistant"])
-            st.markdown(
-                copy_button_js(
-                    entry["assistant"],
-                    f"assistant_copy_{index}",
-                ),
-                unsafe_allow_html=True,
-            )
 
         if SHOW_TOOL_CALLS and entry.get("tool_calls"):
             render_tool_calls(entry["tool_calls"])
@@ -521,10 +499,6 @@ for idx, entry in enumerate(st.session_state.chat_history):
 if user_input := st.chat_input("Ask a question..."):
     with st.chat_message("user"):
         st.markdown(user_input)
-        st.markdown(
-            copy_button_js(user_input, "live_user_copy"),
-            unsafe_allow_html=True,
-        )
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
@@ -538,13 +512,6 @@ if user_input := st.chat_input("Ask a question..."):
 
                 if assistant_text:
                     st.markdown(assistant_text)
-                    st.markdown(
-                        copy_button_js(
-                            assistant_text,
-                            "live_assistant_copy",
-                        ),
-                        unsafe_allow_html=True,
-                    )
 
                 if SHOW_TOOL_CALLS and tool_calls:
                     render_tool_calls(tool_calls)

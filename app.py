@@ -422,12 +422,7 @@ def build_cost_summary(usage_totals):
 
 
 def format_cost_summary(cost_summary):
-    return (
-        f"Cost ${cost_summary['total_cost']:.6f} | "
-        f"Input {cost_summary['non_cached_prompt_tokens']:,} | "
-        f"Cached {cost_summary['cached_prompt_tokens']:,} | "
-        f"Output {cost_summary['completion_tokens']:,}"
-    )
+    return f"Cost: ${cost_summary['total_cost']:.6f}"
 
 
 def render_history_entry(entry, index):

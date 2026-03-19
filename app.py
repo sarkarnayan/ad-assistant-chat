@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 import json
 import os
 from typing import Any
@@ -31,6 +32,16 @@ def get_bool_secret(section_name, field_name, env_var=None, default=False):
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_decimal_secret(section_name, field_name, env_var=None, default="0"):
+    value = get_secret_value(
+        section_name,
+        field_name,
+        env_var=env_var,
+        default=default,
+    )
+    return Decimal(str(value))
 
 
 DEEPINFRA_API_KEY = get_secret_value(
@@ -76,6 +87,30 @@ SHOW_TOOL_CALLS = get_bool_secret(
     "show_tool_calls",
     env_var="SHOW_TOOL_CALLS",
     default=False,
+)
+SHOW_QUERY_COST = get_bool_secret(
+    "ui",
+    "show_query_cost",
+    env_var="SHOW_QUERY_COST",
+    default=True,
+)
+INPUT_COST_PER_MILLION = get_decimal_secret(
+    "deepinfra",
+    "input_cost_per_million",
+    env_var="DEEPINFRA_INPUT_COST_PER_MILLION",
+    default="1.20",
+)
+OUTPUT_COST_PER_MILLION = get_decimal_secret(
+    "deepinfra",
+    "output_cost_per_million",
+    env_var="DEEPINFRA_OUTPUT_COST_PER_MILLION",
+    default="6.00",
+)
+CACHED_INPUT_COST_PER_MILLION = get_decimal_secret(
+    "deepinfra",
+    "cached_input_cost_per_million",
+    env_var="DEEPINFRA_CACHED_INPUT_COST_PER_MILLION",
+    default="0.24",
 )
 
 
@@ -323,6 +358,78 @@ def render_tool_calls(tool_calls):
             render_tool_output(tool_call["result"])
 
 
+def empty_usage_totals():
+    return {
+        "prompt_tokens": 0,
+        "cached_prompt_tokens": 0,
+        "non_cached_prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def add_response_usage(usage_totals, response):
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    cached_prompt_tokens = int(
+        getattr(prompt_details, "cached_tokens", 0) or 0
+    )
+    cached_prompt_tokens = max(0, min(cached_prompt_tokens, prompt_tokens))
+    non_cached_prompt_tokens = prompt_tokens - cached_prompt_tokens
+
+    usage_totals["prompt_tokens"] += prompt_tokens
+    usage_totals["cached_prompt_tokens"] += cached_prompt_tokens
+    usage_totals["non_cached_prompt_tokens"] += non_cached_prompt_tokens
+    usage_totals["completion_tokens"] += completion_tokens
+    usage_totals["total_tokens"] += total_tokens
+
+
+def build_cost_summary(usage_totals):
+    if usage_totals["total_tokens"] <= 0:
+        return None
+
+    input_cost = (
+        Decimal(usage_totals["non_cached_prompt_tokens"])
+        * INPUT_COST_PER_MILLION
+        / Decimal(1_000_000)
+    )
+    cached_input_cost = (
+        Decimal(usage_totals["cached_prompt_tokens"])
+        * CACHED_INPUT_COST_PER_MILLION
+        / Decimal(1_000_000)
+    )
+    output_cost = (
+        Decimal(usage_totals["completion_tokens"])
+        * OUTPUT_COST_PER_MILLION
+        / Decimal(1_000_000)
+    )
+    total_cost = input_cost + cached_input_cost + output_cost
+
+    return {
+        **usage_totals,
+        "input_cost": float(input_cost),
+        "cached_input_cost": float(cached_input_cost),
+        "output_cost": float(output_cost),
+        "total_cost": float(total_cost),
+    }
+
+
+def format_cost_summary(cost_summary):
+    return (
+        f"Cost ${cost_summary['total_cost']:.6f} | "
+        f"Input {cost_summary['non_cached_prompt_tokens']:,} | "
+        f"Cached {cost_summary['cached_prompt_tokens']:,} | "
+        f"Output {cost_summary['completion_tokens']:,}"
+    )
+
+
 def render_history_entry(entry, index):
     with st.chat_message("user"):
         st.markdown(entry["user"])
@@ -330,6 +437,9 @@ def render_history_entry(entry, index):
     with st.chat_message("assistant"):
         if entry.get("assistant"):
             st.markdown(entry["assistant"])
+
+        if SHOW_QUERY_COST and entry.get("cost_summary"):
+            st.caption(format_cost_summary(entry["cost_summary"]))
 
         if SHOW_TOOL_CALLS and entry.get("tool_calls"):
             render_tool_calls(entry["tool_calls"])
@@ -418,6 +528,7 @@ async def run_deepinfra_turn(user_input, chat_history):
             {"role": "user", "content": user_input},
         ]
         tool_events = []
+        usage_totals = empty_usage_totals()
         latest_assistant_text = ""
 
         for _ in range(MAX_TOOL_ROUNDS):
@@ -428,12 +539,17 @@ async def run_deepinfra_turn(user_input, chat_history):
                 tools=tool_schemas,
                 tool_choice="auto",
             )
+            add_response_usage(usage_totals, response)
             assistant_message = response.choices[0].message
             latest_assistant_text = assistant_message.content or ""
             tool_calls = assistant_message.tool_calls or []
 
             if not tool_calls:
-                return latest_assistant_text, tool_events
+                return (
+                    latest_assistant_text,
+                    tool_events,
+                    build_cost_summary(usage_totals),
+                )
 
             messages.append(
                 {
@@ -480,7 +596,7 @@ async def run_deepinfra_turn(user_input, chat_history):
             or "I completed multiple tool rounds but still need additional "
             "tool calls to finish this request."
         )
-        return fallback_text, tool_events
+        return fallback_text, tool_events, build_cost_summary(usage_totals)
 
 
 st.set_page_config(page_title="Meta Ads Chat", layout="centered")
@@ -503,7 +619,7 @@ if user_input := st.chat_input("Ask a question..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                assistant_text, tool_calls = run_async(
+                assistant_text, tool_calls, cost_summary = run_async(
                     run_deepinfra_turn(
                         user_input,
                         st.session_state.chat_history,
@@ -513,6 +629,9 @@ if user_input := st.chat_input("Ask a question..."):
                 if assistant_text:
                     st.markdown(assistant_text)
 
+                if SHOW_QUERY_COST and cost_summary:
+                    st.caption(format_cost_summary(cost_summary))
+
                 if SHOW_TOOL_CALLS and tool_calls:
                     render_tool_calls(tool_calls)
 
@@ -520,6 +639,7 @@ if user_input := st.chat_input("Ask a question..."):
                     "user": user_input,
                     "assistant": assistant_text,
                     "tool_calls": tool_calls,
+                    "cost_summary": cost_summary,
                 }
                 last_entry = (
                     st.session_state.chat_history[-1]

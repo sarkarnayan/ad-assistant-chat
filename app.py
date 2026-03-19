@@ -20,6 +20,20 @@ def get_secret_value(section_name, field_name, env_var=None, default=None):
     return section.get(field_name, default)
 
 
+def get_bool_secret(section_name, field_name, env_var=None, default=False):
+    value = get_secret_value(
+        section_name,
+        field_name,
+        env_var=env_var,
+        default=default,
+    )
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 DEEPINFRA_API_KEY = get_secret_value(
     "deepinfra",
     "api_token",
@@ -57,6 +71,12 @@ MAX_TOOL_ROUNDS = int(
         env_var="DEEPINFRA_MAX_TOOL_ROUNDS",
         default=6,
     )
+)
+SHOW_TOOL_CALLS = get_bool_secret(
+    "ui",
+    "show_tool_calls",
+    env_var="SHOW_TOOL_CALLS",
+    default=False,
 )
 
 
@@ -207,13 +227,12 @@ def mcp_endpoint_url():
 
 def copy_button_js(text, key="copy"):
     escaped = html.escape(text).replace("`", "\\`")
-    return f"""
-    <button id="{key}"
-    onclick="navigator.clipboard.writeText(`{escaped}`); alert('Copied')"
-    style='margin-top: 4px; padding: 4px 8px; font-size: 0.85rem;'>
-    Copy
-    </button>
-    """
+    return (
+        f"<button id=\"{key}\" "
+        f"onclick=\"navigator.clipboard.writeText(`{escaped}`); alert('Copied')\" "
+        "style='margin-top: 4px; padding: 4px 8px; font-size: 0.85rem;'>"
+        "Copy</button>"
+    )
 
 
 def run_async(coro):
@@ -334,8 +353,38 @@ def render_history_entry(entry, index):
                 unsafe_allow_html=True,
             )
 
-        if entry.get("tool_calls"):
+        if SHOW_TOOL_CALLS and entry.get("tool_calls"):
             render_tool_calls(entry["tool_calls"])
+
+
+def build_memory_messages(chat_history, max_turns=2):
+    recent_entries = []
+    for entry in reversed(chat_history):
+        if "claude_blocks" in entry:
+            continue
+        if not entry.get("user"):
+            continue
+        recent_entries.append(entry)
+        if len(recent_entries) >= max_turns:
+            break
+
+    memory_messages = []
+    for entry in reversed(recent_entries):
+        memory_messages.append(
+            {
+                "role": "user",
+                "content": entry["user"],
+            }
+        )
+        if entry.get("assistant"):
+            memory_messages.append(
+                {
+                    "role": "assistant",
+                    "content": entry["assistant"],
+                }
+            )
+
+    return memory_messages
 
 
 def build_openai_tools(mcp_tools):
@@ -366,7 +415,7 @@ def get_function_tool_call(tool_call: Any):
     return function
 
 
-async def run_deepinfra_turn(user_input):
+async def run_deepinfra_turn(user_input, chat_history):
     async with MCPClient(
         mcp_endpoint_url(),
         auth=PIPEBOARD_AUTH_TOKEN,
@@ -384,8 +433,10 @@ async def run_deepinfra_turn(user_input):
         if mcp_instructions:
             system_content = system_content + "\n\n" + mcp_instructions
 
+        memory_messages = build_memory_messages(chat_history, max_turns=2)
         messages: list[Any] = [
             {"role": "system", "content": system_content},
+            *memory_messages,
             {"role": "user", "content": user_input},
         ]
         tool_events = []
@@ -479,7 +530,10 @@ if user_input := st.chat_input("Ask a question..."):
         with st.spinner("Thinking..."):
             try:
                 assistant_text, tool_calls = run_async(
-                    run_deepinfra_turn(user_input)
+                    run_deepinfra_turn(
+                        user_input,
+                        st.session_state.chat_history,
+                    )
                 )
 
                 if assistant_text:
@@ -492,16 +546,21 @@ if user_input := st.chat_input("Ask a question..."):
                         unsafe_allow_html=True,
                     )
 
-                if tool_calls:
+                if SHOW_TOOL_CALLS and tool_calls:
                     render_tool_calls(tool_calls)
 
-                st.session_state.chat_history.append(
-                    {
-                        "user": user_input,
-                        "assistant": assistant_text,
-                        "tool_calls": tool_calls,
-                    }
+                new_entry = {
+                    "user": user_input,
+                    "assistant": assistant_text,
+                    "tool_calls": tool_calls,
+                }
+                last_entry = (
+                    st.session_state.chat_history[-1]
+                    if st.session_state.chat_history
+                    else None
                 )
+                if not last_entry or last_entry != new_entry:
+                    st.session_state.chat_history.append(new_entry)
             except Exception as exc:
                 error_text = str(exc)
                 if "401" in error_text and "pipeboard" in error_text.lower():
